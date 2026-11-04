@@ -29,14 +29,21 @@ export default function Workspace() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    try {
-      const [g, c] = await Promise.all([listGraphs(), listChats()]);
-      setGraphs(g);
-      setChats(c);
-      setError(null);
-    } catch (cause) {
+    const [graphsResult, chatsResult] = await Promise.allSettled([listGraphs(), listChats()]);
+    if (graphsResult.status === 'fulfilled') {
+      setGraphs(graphsResult.value);
+    } else {
       setGraphs([]);
+    }
+    if (chatsResult.status === 'fulfilled') {
+      setChats(chatsResult.value);
+    }
+    const failed = [graphsResult, chatsResult].find((result) => result.status === 'rejected');
+    if (failed?.status === 'rejected') {
+      const cause = failed.reason;
       setError(cause instanceof Error ? cause.message : 'Could not reach the API');
+    } else {
+      setError(null);
     }
   }, []);
 

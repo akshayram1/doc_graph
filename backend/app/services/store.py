@@ -90,31 +90,69 @@ def ensure_collection() -> str:
     return collection
 
 
+_adopting = False
+
+
+def _adopt_untagged(client: QdrantClient, collection: str, records: list) -> None:
+    """Points already in Qdrant with no document id still belong on the document list.
+
+    Uploads from before each file became its own graph have nodes, but no graph_id,
+    so the list skipped them. They are grouped into one document and named in Qdrant.
+    """
+    global _adopting
+    if _adopting:
+        return
+    missing = [record for record in records if not (record.payload or {}).get(GRAPH_FIELD)]
+    if not missing:
+        return
+
+    from datetime import datetime, timezone
+
+    _adopting = True
+    try:
+        graph_id = registry.LEGACY_GRAPH_ID
+        created_at = datetime.now(timezone.utc).isoformat()
+        client.set_payload(
+            collection_name=collection,
+            payload={GRAPH_FIELD: graph_id},
+            points=[record.id for record in missing],
+            wait=True,
+        )
+        sample = next(
+            (
+                record.payload or {}
+                for record in records
+                if (record.payload or {}).get(GRAPH_FIELD) == graph_id and (record.payload or {}).get(DOC_NAME)
+            ),
+            {},
+        )
+        name = sample.get(DOC_NAME) or "Earlier uploads"
+        filename = sample.get(DOC_FILE) or "(uploaded before documents were tracked)"
+        color = sample.get(DOC_COLOR) or registry.color_for(graph_id)
+        created_at = sample.get(DOC_CREATED) or created_at
+        stamp_document(graph_id, name, filename, color, created_at)
+    finally:
+        _adopting = False
+
+    for record in missing:
+        payload = record.payload or {}
+        payload[GRAPH_FIELD] = graph_id
+        payload[DOC_NAME] = name
+        payload[DOC_FILE] = filename
+        payload[DOC_COLOR] = color
+        payload[DOC_CREATED] = created_at
+        record.payload = payload
+
+
 def _migrate_untagged(client: QdrantClient, collection: str) -> None:
-    """Nodes uploaded before graphs existed get grouped into one 'Earlier uploads' graph."""
+    """Used when the collection is first indexed. Listing adopts the same points."""
     untagged = models.Filter(
         must=[models.IsEmptyCondition(is_empty=models.PayloadField(key=GRAPH_FIELD))]
     )
     count = client.count(collection_name=collection, count_filter=untagged, exact=True).count
     if count == 0:
         return
-
-    client.set_payload(
-        collection_name=collection,
-        payload={GRAPH_FIELD: registry.LEGACY_GRAPH_ID},
-        points=untagged,
-        wait=True,
-    )
-
-    if registry.get_graph(registry.LEGACY_GRAPH_ID) is None:
-        edges = len(_build_graph(_scroll(client, collection, [registry.LEGACY_GRAPH_ID], 10_000)).edges)
-        registry.create_graph(
-            name="Earlier uploads",
-            filename="(uploaded before documents were tracked)",
-            node_count=count,
-            edge_count=edges,
-            graph_id=registry.LEGACY_GRAPH_ID,
-        )
+    _adopt_untagged(client, collection, _scroll(client, collection, None, 100_000))
 
 
 def _document_meta(client: QdrantClient, collection: str, graph_id: str) -> dict:
@@ -144,10 +182,11 @@ def stamp_document(graph_id: str, name: str, filename: str, color: str, created_
 
 
 def document_graphs() -> list[dict]:
-    """One card per graph_id actually present in Qdrant."""
+    """One card per document actually stored in Qdrant, including older uploads."""
     collection = ensure_collection()
     client = get_client()
     records = _scroll(client, collection, None, 100_000)
+    _adopt_untagged(client, collection, records)
     groups: dict[str, dict] = {}
 
     for record in records:
