@@ -12,6 +12,11 @@ from app.services.embeddings import encode_documents, encode_query
 
 SPARSE_VECTOR_NAME = "bm25"
 GRAPH_FIELD = "graph_id"
+DOC_NAME = "doc_name"
+DOC_FILE = "filename"
+DOC_COLOR = "color"
+DOC_CREATED = "doc_created_at"
+DOC_FIELDS = (DOC_NAME, DOC_FILE, DOC_COLOR, DOC_CREATED)
 SCROLL_PAGE = 256
 
 
@@ -112,10 +117,100 @@ def _migrate_untagged(client: QdrantClient, collection: str) -> None:
         )
 
 
+def _document_meta(client: QdrantClient, collection: str, graph_id: str) -> dict:
+    """Name, file, colour, and time already stored on this document's nodes."""
+    existing = _scroll(client, collection, [graph_id], 1)
+    if not existing:
+        return {}
+    payload = existing[0].payload or {}
+    return {field: payload[field] for field in DOC_FIELDS if payload.get(field)}
+
+
+def stamp_document(graph_id: str, name: str, filename: str, color: str, created_at: str) -> None:
+    """Write document metadata onto every node of a graph. This is what other machines read."""
+    collection = ensure_collection()
+    client = get_client()
+    client.set_payload(
+        collection_name=collection,
+        payload={
+            DOC_NAME: name,
+            DOC_FILE: filename,
+            DOC_COLOR: color,
+            DOC_CREATED: created_at,
+        },
+        points=graph_filter([graph_id]),
+        wait=True,
+    )
+
+
+def document_graphs() -> list[dict]:
+    """One card per graph_id actually present in Qdrant."""
+    collection = ensure_collection()
+    client = get_client()
+    records = _scroll(client, collection, None, 100_000)
+    groups: dict[str, dict] = {}
+
+    for record in records:
+        payload = record.payload or {}
+        graph_id = payload.get(GRAPH_FIELD) or ""
+        key = payload.get("key")
+        if not graph_id or not key:
+            continue
+        group = groups.get(graph_id)
+        if group is None:
+            group = {
+                "id": graph_id,
+                "name": "",
+                "filename": "",
+                "color": "",
+                "created_at": "",
+                "keys": set(),
+                "relations": [],
+            }
+            groups[graph_id] = group
+        group["keys"].add(key)
+        group["relations"].append((key, payload.get("relations") or []))
+        if not group["name"] and payload.get(DOC_NAME):
+            group["name"] = payload[DOC_NAME]
+        if not group["filename"] and payload.get(DOC_FILE):
+            group["filename"] = payload[DOC_FILE]
+        if not group["color"] and payload.get(DOC_COLOR):
+            group["color"] = payload[DOC_COLOR]
+        if not group["created_at"] and payload.get(DOC_CREATED):
+            group["created_at"] = payload[DOC_CREATED]
+
+    graphs = []
+    for group in groups.values():
+        seen: set[tuple[str, str, str]] = set()
+        edges = 0
+        for key, relations in group["relations"]:
+            for relation in relations:
+                target = relation.get("target", "")
+                rel_type = relation.get("type", "related_to")
+                signature = (key, target, rel_type)
+                if target in group["keys"] and target != key and signature not in seen:
+                    seen.add(signature)
+                    edges += 1
+        graphs.append(
+            {
+                "id": group["id"],
+                "name": group["name"] or group["id"],
+                "filename": group["filename"] or "",
+                "color": group["color"],
+                "node_count": len(group["keys"]),
+                "edge_count": edges,
+                "created_at": group["created_at"],
+            }
+        )
+    graphs.sort(key=lambda graph: graph["created_at"], reverse=True)
+    return graphs
+
+
 def upsert_nodes(nodes: Sequence[NodeInput], graph_id: str) -> int:
     collection = ensure_collection()
     client = get_client()
     vectors = encode_documents([f"{node.label}. {node.text}" for node in nodes])
+    meta = _document_meta(client, collection, graph_id)
 
     points = [
         models.PointStruct(
@@ -128,6 +223,7 @@ def upsert_nodes(nodes: Sequence[NodeInput], graph_id: str) -> int:
                 "text": node.text,
                 "type": node.type,
                 "relations": [relation.model_dump() for relation in node.relations],
+                **meta,
             },
         )
         for node, vector in zip(nodes, vectors, strict=True)

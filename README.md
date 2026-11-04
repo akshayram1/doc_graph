@@ -69,7 +69,7 @@ In PowerShell, prefix them with `.\` if Windows asks you to:
 - **Chat (`/chat/<id>`)**: each chat is scoped to the graphs ticked in the "Chatting with" bar, and you can change that at any time. Answers come only from those graphs. When several are selected, entities that appear in more than one document are linked and passed to the model. Source chips jump to the node in the graph beside the chat.
 - **Graph explorer (`/graph?ids=a,b`)**: a full-screen graph for any set of documents. Layouts: Network, By document, By type. You also get search, type filters, and a node inspector.
 
-Nodes live in Qdrant tagged with `graph_id`. Document and chat metadata (names, colours, message history) is stored in `backend/data/workspace.json`.
+Nodes, document names, and chats all live in Qdrant. Each node is tagged with `graph_id` plus the document name, so every machine using the same Qdrant collection sees the same documents. Chats are in the `<collection>__workspace` collection.
 
 ## Environment
 
