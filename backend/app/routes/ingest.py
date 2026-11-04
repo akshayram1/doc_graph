@@ -7,7 +7,7 @@ from app.config import Settings, get_settings
 from app.schemas import GraphInfo, UploadResponse
 from app.services import registry
 from app.services.ingest import process_upload
-from app.services.store import delete_graph_nodes, fetch_graph, upsert_nodes
+from app.services.store import delete_graph_nodes, explain_store_error, fetch_graph, upsert_nodes
 
 router = APIRouter(prefix="/api", tags=["ingest"])
 
@@ -60,6 +60,10 @@ async def upload_file(
     display_name = (name or "").strip() or Path(file.filename).stem.replace("_", " ").replace("-", " ").strip()
     try:
         ingested = upsert_nodes(nodes, graph_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=explain_store_error(e) or f"Saving the nodes failed: {e}")
+
+    try:
         edges = len(fetch_graph(len(nodes) + 10, [graph_id]).edges)
         graph = registry.create_graph(
             name=display_name or file.filename,
@@ -68,13 +72,12 @@ async def upload_file(
             edge_count=edges,
             graph_id=graph_id,
         )
-    except Exception as e:
-        # Don't leave nodes in Qdrant that no document graph points to.
-        try:
+    except Exception:
+        # Nodes are already in Qdrant. A naming failure must not delete them.
+        graph = registry.get_graph(graph_id)
+        if graph is None:
             delete_graph_nodes(graph_id)
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail=f"Saving the graph failed: {e}")
+            raise HTTPException(status_code=500, detail="Saving the nodes failed.")
 
     return UploadResponse(
         graph=GraphInfo(**graph),

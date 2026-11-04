@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.config import Settings, get_settings
 from app.schemas import ClearResponse, GraphDeleteResponse, GraphInfo, GraphResponse
 from app.services import registry
-from app.services.store import clear_collection, delete_graph_nodes, ensure_collection, fetch_graph
+from app.services.store import clear_collection, delete_graph_nodes, ensure_collection, explain_store_error, fetch_graph
 
 router = APIRouter(prefix="/api", tags=["graph"])
 
@@ -17,8 +17,14 @@ def parse_ids(graph_ids: str | None) -> list[str] | None:
 
 @router.get("/graphs", response_model=list[GraphInfo])
 def list_graphs() -> list[GraphInfo]:
-    ensure_collection()  # runs the one-time migration that registers earlier uploads
-    return [GraphInfo(**graph) for graph in registry.list_graphs()]
+    try:
+        ensure_collection()
+        return [GraphInfo(**graph) for graph in registry.list_graphs()]
+    except Exception as exc:
+        hint = explain_store_error(exc)
+        if hint:
+            raise HTTPException(status_code=502, detail=hint) from exc
+        raise
 
 
 @router.delete("/graphs/{graph_id}", response_model=GraphDeleteResponse)

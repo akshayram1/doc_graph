@@ -35,10 +35,17 @@ EXTRACTION_SYSTEM_PROMPT = (
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
-    reader = PdfReader(io.BytesIO(file_bytes))
+    try:
+        reader = PdfReader(io.BytesIO(file_bytes), strict=False)
+    except Exception as exc:
+        raise ValueError(f"Could not open this PDF. It may be damaged or incomplete. ({exc})") from exc
+
     pages_text: list[str] = []
     for page_idx, page in enumerate(reader.pages):
-        text = page.extract_text() or ""
+        try:
+            text = page.extract_text() or ""
+        except Exception:
+            text = ""
         if text.strip():
             pages_text.append(f"--- Page {page_idx + 1} ---\n{text.strip()}")
     return "\n\n".join(pages_text)
@@ -168,7 +175,11 @@ async def extract_entities_from_chunk(chunk: str) -> list[NodeInput]:
 
     async with httpx.AsyncClient(timeout=90) as client:
         body = await _post_chat(client, settings, payload)
-        raw = body["choices"][0]["message"].get("content") or ""
+        message = body["choices"][0]["message"]
+        raw = (message.get("content") or "").strip()
+        if not raw:
+            # Some models put the JSON in the hidden reasoning channel and leave content empty.
+            raw = (message.get("reasoning") or message.get("reasoning_content") or "").strip()
 
     raw_nodes = _clean_json_response(raw)
     nodes: list[NodeInput] = []
@@ -210,43 +221,36 @@ async def extract_entities_from_chunk(chunk: str) -> list[NodeInput]:
 
 async def process_upload(filename: str, file_bytes: bytes) -> list[NodeInput]:
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    
-    # For PDF, use raw text fallback if extraction fails
+
     if ext == "pdf":
-        raw_text = extract_text_from_pdf(file_bytes)
-        # Try to clean up and make it more readable for entity extraction
-        raw_text = _clean_up_pdf_text(raw_text)
-        
-        # If still empty or very short, try alternative text extraction method
-        if not raw_text.strip() or len(raw_text.strip()) < 50:
-            try:
-                import pdfplumber
-                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                    pages_text = []
-                    for page in pdf.pages:
-                        table = page.extract_tables()[0] if page.extract_tables() else None
-                        if table:
-                            text = "\n".join(str(cell) for row in table for cell in row if cell.strip())
-                            pages_text.append(text)
-                            break
-                    raw_text = "\n\n".join(pages_text)
-            except ImportError:
-                pass  # Keep pypdf result
-    
+        try:
+            raw_text = _clean_up_pdf_text(extract_text_from_pdf(file_bytes))
+        except ValueError:
+            raw_text = ""
+        if len(raw_text.strip()) < 50:
+            fallback = _pdfplumber_text(file_bytes)
+            if fallback.strip():
+                raw_text = _clean_up_pdf_text(fallback)
+
     elif ext == "csv":
         raw_text = extract_text_from_csv(file_bytes)
-    
+
     else:
         raise ValueError(f"Unsupported file extension: .{ext}")
 
     if not raw_text.strip():
-        return []
+        raise ValueError("No readable text was found in this file, so no nodes could be created.")
 
     chunks = _chunk_text(raw_text, max_chunk_size=4000)
     all_nodes_by_key: dict[str, NodeInput] = {}
+    failures: list[Exception] = []
 
     for chunk in chunks:
-        chunk_nodes = await extract_entities_from_chunk(chunk)
+        try:
+            chunk_nodes = await extract_entities_from_chunk(chunk)
+        except Exception as exc:
+            failures.append(exc)
+            continue
         for node in chunk_nodes:
             if node.key in all_nodes_by_key:
                 # Merge relations and append text if distinct
@@ -261,7 +265,23 @@ async def process_upload(filename: str, file_bytes: bytes) -> list[NodeInput]:
             else:
                 all_nodes_by_key[node.key] = node
 
+    if not all_nodes_by_key and failures:
+        raise failures[-1]
     return list(all_nodes_by_key.values())
+
+
+def _pdfplumber_text(file_bytes: bytes) -> str:
+    try:
+        import pdfplumber
+    except ImportError:
+        return ""
+    pages: list[str] = []
+    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            if text.strip():
+                pages.append(text.strip())
+    return "\n\n".join(pages)
 
 
 async def _post_chat(client: httpx.AsyncClient, settings, payload: dict) -> dict:

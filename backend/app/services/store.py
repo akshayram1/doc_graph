@@ -24,6 +24,18 @@ class StoreNotConfigured(RuntimeError):
     pass
 
 
+def explain_store_error(exc: Exception) -> str | None:
+    """Qdrant says Not Found when this machine's .env does not point at the real collection."""
+    text = str(exc)
+    if "not found" in text.lower() or "404" in text:
+        return (
+            "Qdrant returned Not Found, so no nodes were saved. "
+            "Copy the real .env onto this computer (QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION). "
+            "The example file does not point at the collection that already has the documents."
+        )
+    return None
+
+
 @lru_cache
 def get_client() -> QdrantClient:
     settings = get_settings()

@@ -111,7 +111,7 @@ if (!frontendOnly) {
 
   const backendProc = spawn(
     pythonExecutable,
-    ['-m', 'uvicorn', 'app.main:app', '--reload', '--host', '127.0.0.1', '--port', '8000'],
+    ['-m', 'uvicorn', 'app.main:app', '--reload', '--host', '0.0.0.0', '--port', '8000'],
     {
       cwd: backendDir,
       env: backendEnv,

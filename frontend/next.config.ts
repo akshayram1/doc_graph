@@ -34,10 +34,7 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_API_URL: apiUrl,
   },
   async rewrites() {
-    return [
-      { source: '/api/:path*', destination: `${apiUrl}/api/:path*` },
-      { source: '/health', destination: `${apiUrl}/health` },
-    ];
+    return [{ source: '/health', destination: `${apiUrl}/health` }];
   },
 };
 
