@@ -1,0 +1,16 @@
+{
+  "name": "finsk",
+  "version": "1.0.0",
+  "description": "Finsk - University Knowledge Graph and Placement System",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "start": "node scripts/dev.js",
+    "dev:backend": "node scripts/dev.js --backend-only",
+    "dev:frontend": "node scripts/dev.js --frontend-only"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
+
