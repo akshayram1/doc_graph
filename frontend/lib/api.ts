@@ -99,15 +99,36 @@ export type UploadResponse = {
   extracted_nodes: number;
   ingested_nodes: number;
   collection: string;
+  debug?: string[];
 };
 
-async function readError(response: Response): Promise<string> {
+export type ApiFailure = Error & { debug: string[] };
+
+function asFailure(message: string, debug: string[] = []): ApiFailure {
+  const error = new Error(message) as ApiFailure;
+  error.debug = debug;
+  return error;
+}
+
+async function readError(response: Response): Promise<ApiFailure> {
+  const text = await response.text();
   try {
-    const body = await response.json();
-    return typeof body.detail === 'string' ? body.detail : `Request failed (${response.status})`;
+    const body = JSON.parse(text) as { detail?: unknown; message?: unknown; debug?: unknown };
+    const topDebug = Array.isArray(body.debug) ? body.debug.map(String) : [];
+    const detail = body.detail;
+    if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+      const record = detail as { message?: unknown; debug?: unknown };
+      const debug = Array.isArray(record.debug) ? record.debug.map(String) : topDebug;
+      const message = typeof record.message === 'string' ? record.message : `Request failed (${response.status})`;
+      return asFailure(message, debug);
+    }
+    if (typeof detail === 'string' && detail.trim()) return asFailure(detail, topDebug);
+    if (typeof body.message === 'string' && body.message.trim()) return asFailure(body.message, topDebug);
   } catch {
-    return `Request failed (${response.status})`;
+    const plain = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (plain) return asFailure(plain.slice(0, 400));
   }
+  return asFailure(`Request failed (${response.status})`);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -120,7 +141,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw await readError(response);
   }
   return response.json();
 }

@@ -713,6 +713,20 @@ textarea {
   justify-content: flex-end;
 }
 
+.upload-debug {
+  background: #0f172a;
+  border-radius: 8px;
+  color: #d1fae5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
 .busy-note {
   align-items: center;
   color: var(--ink-2);

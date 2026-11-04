@@ -14,6 +14,16 @@ router = APIRouter(prefix="/api", tags=["ingest"])
 MAX_FILE_SIZE = 15 * 1024 * 1024  # 15 MB
 
 
+def _note(steps: list[str], message: str) -> None:
+    steps.append(message)
+    print(f"[upload] {message}", flush=True)
+
+
+def _fail(status: int, message: str, steps: list[str]) -> None:
+    _note(steps, f"FAILED: {message}")
+    raise HTTPException(status_code=status, detail={"message": message, "debug": steps})
+
+
 @router.post("/upload", response_model=UploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
@@ -21,48 +31,46 @@ async def upload_file(
     settings: Settings = Depends(get_settings),
 ) -> UploadResponse:
     """Each upload becomes its own document graph."""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
+    steps: list[str] = []
+    _note(steps, f"collection={settings.qdrant_collection} model={settings.groq_model}")
 
+    if not file.filename:
+        _fail(400, "No file provided", steps)
+
+    _note(steps, f"received {file.filename}")
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
     if ext not in ("csv", "pdf"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type (.{ext}). Only .csv and .pdf files are supported.",
-        )
+        _fail(400, f"Unsupported file type (.{ext}). Only .csv and .pdf files are supported.", steps)
 
     try:
         contents = await file.read()
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read file: {e}")
+        _fail(400, f"Failed to read file: {e}", steps)
 
+    _note(steps, f"read {len(contents)} bytes")
     if len(contents) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File exceeds maximum allowed size ({MAX_FILE_SIZE // (1024 * 1024)}MB).",
-        )
-
+        _fail(400, f"File exceeds maximum allowed size ({MAX_FILE_SIZE // (1024 * 1024)}MB).", steps)
     if len(contents) == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        _fail(400, "Uploaded file is empty.", steps)
 
     try:
         nodes = await process_upload(file.filename, contents)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI entity extraction failed: {e}")
+        _fail(500, f"AI entity extraction failed: {e}", steps)
 
+    _note(steps, f"extracted {len(nodes)} nodes")
     if not nodes:
-        raise HTTPException(
-            status_code=422,
-            detail="No entities or relationships could be extracted from this file. Ensure the file contains readable text.",
-        )
+        _fail(422, "No entities or relationships could be extracted from this file.", steps)
 
     graph_id = uuid4().hex[:12]
     display_name = (name or "").strip() or Path(file.filename).stem.replace("_", " ").replace("-", " ").strip()
+    _note(steps, f"saving graph {graph_id} as {display_name or file.filename}")
     try:
         ingested = upsert_nodes(nodes, graph_id)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=explain_store_error(e) or f"Saving the nodes failed: {e}")
+        _fail(502, explain_store_error(e) or f"Saving the nodes failed: {e}", steps)
 
+    _note(steps, f"wrote {ingested} nodes to Qdrant")
     try:
         edges = len(fetch_graph(len(nodes) + 10, [graph_id]).edges)
         graph = registry.create_graph(
@@ -72,16 +80,18 @@ async def upload_file(
             edge_count=edges,
             graph_id=graph_id,
         )
-    except Exception:
-        # Nodes are already in Qdrant. A naming failure must not delete them.
+    except Exception as e:
         graph = registry.get_graph(graph_id)
         if graph is None:
             delete_graph_nodes(graph_id)
-            raise HTTPException(status_code=500, detail="Saving the nodes failed.")
+            _fail(500, f"Saving the nodes failed: {e}", steps)
+        _note(steps, f"nodes are in Qdrant, naming step failed: {e}")
 
+    _note(steps, f"done: {graph['node_count']} nodes, {graph['edge_count']} links")
     return UploadResponse(
         graph=GraphInfo(**graph),
         extracted_nodes=len(nodes),
         ingested_nodes=ingested,
         collection=settings.qdrant_collection,
+        debug=steps,
     )

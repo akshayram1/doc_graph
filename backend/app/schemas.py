@@ -168,3 +168,4 @@ class UploadResponse(BaseModel):
     extracted_nodes: int
     ingested_nodes: int
     collection: str
+    debug: list[str] = Field(default_factory=list)

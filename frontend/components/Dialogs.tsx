@@ -38,6 +38,7 @@ export function UploadDialog({ onClose, onUploaded }: { onClose: () => void; onU
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [debug, setDebug] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const pick = (f: File | undefined) => {
@@ -56,9 +57,17 @@ export function UploadDialog({ onClose, onUploaded }: { onClose: () => void; onU
     if (!file) return;
     setBusy(true);
     setError(null);
+    const trace = [`POST /api/upload`, `file ${file.name} (${file.size} bytes)`, name.trim() ? `name ${name.trim()}` : 'name from filename'];
+    setDebug(trace);
     try {
-      onUploaded(await uploadFile(file, name));
+      const result = await uploadFile(file, name);
+      setDebug([...(result.debug ?? trace), `saved ${result.ingested_nodes} nodes in ${result.collection}`]);
+      onUploaded(result);
     } catch (cause) {
+      const extra = cause instanceof Error && 'debug' in cause && Array.isArray((cause as { debug?: string[] }).debug)
+        ? (cause as { debug: string[] }).debug
+        : [];
+      setDebug(extra.length ? extra : [...trace, cause instanceof Error ? cause.message : 'Upload failed']);
       setError(cause instanceof Error ? cause.message : 'Upload failed');
       setBusy(false);
     }
@@ -117,6 +126,11 @@ export function UploadDialog({ onClose, onUploaded }: { onClose: () => void; onU
       </label>
 
       {error && <div className="alert alert-error">{error}</div>}
+      {debug.length > 0 && (
+        <pre className="upload-debug" aria-label="Upload debug log">
+          {debug.join('\n')}
+        </pre>
+      )}
 
       <div className="modal-actions">
         {busy && (

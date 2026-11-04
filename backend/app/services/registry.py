@@ -4,22 +4,15 @@ Nodes live in the main collection. Each node carries the document name, file,
 colour, and created time, so any machine with the same Qdrant credentials sees
 the same document list. Chats live in a companion collection
 (`<collection>__workspace`) because they are not graph nodes.
-
-A leftover `backend/data/workspace.json` from the old local store is copied
-into Qdrant once, then renamed. After that the file is not read.
+Nothing is stored in a file on the computer.
 """
 
-import json
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from qdrant_client import models
-
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-STORE_PATH = DATA_DIR / "workspace.json"
 
 GRAPH_COLORS = [
     "#4f6df5",
@@ -35,7 +28,6 @@ GRAPH_COLORS = [
 LEGACY_GRAPH_ID = "earlier-uploads"
 
 _lock = threading.RLock()
-_imported = False
 
 
 def _now() -> str:
@@ -81,56 +73,11 @@ def _chat_point_id(chat_id: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"finsk-chat:{chat_id}"))
 
 
-def _import_local_file() -> None:
-    """Copy the old on-disk workspace into Qdrant a single time."""
-    global _imported
-    if _imported or not STORE_PATH.exists():
-        _imported = True
-        return
-
-    try:
-        data = json.loads(STORE_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        _imported = True
-        return
-
-    from app.services.store import document_graphs, stamp_document
-
-    present = {graph["id"] for graph in document_graphs()}
-    for graph in data.get("graphs", []):
-        graph_id = graph.get("id")
-        if graph_id not in present:
-            continue
-        stamp_document(
-            graph_id,
-            graph.get("name") or graph_id,
-            graph.get("filename") or "",
-            graph.get("color") or color_for(graph_id),
-            graph.get("created_at") or _now(),
-        )
-
-    known = {graph["id"] for graph in document_graphs()}
-    for chat in data.get("chats", []):
-        if not chat.get("id") or _get_chat(chat["id"]) is not None:
-            continue
-        chat["graph_ids"] = [gid for gid in chat.get("graph_ids", []) if gid in known]
-        chat.setdefault("messages", [])
-        chat.setdefault("title", "New chat")
-        chat.setdefault("created_at", _now())
-        chat.setdefault("updated_at", chat["created_at"])
-        _upsert_chat(chat)
-
-    migrated = STORE_PATH.with_name("workspace.json.migrated")
-    STORE_PATH.replace(migrated)
-    _imported = True
-
-
 # ---------------------------------------------------------------- graphs
 
 
 def list_graphs() -> list[dict[str, Any]]:
     with _lock:
-        _import_local_file()
         from app.services.store import document_graphs
 
         graphs = document_graphs()
@@ -152,7 +99,6 @@ def create_graph(
     graph_id: str | None = None,
 ) -> dict[str, Any]:
     with _lock:
-        _import_local_file()
         from app.services.store import stamp_document
 
         gid = graph_id or uuid4().hex[:12]
@@ -176,7 +122,6 @@ def create_graph(
 def delete_graph(graph_id: str) -> bool:
     """Drop the document from every chat. Nodes are removed by the caller."""
     with _lock:
-        _import_local_file()
         changed = False
         for chat in _all_chats():
             if graph_id not in chat.get("graph_ids", []):
@@ -190,7 +135,6 @@ def delete_graph(graph_id: str) -> bool:
 
 def clear_graphs() -> None:
     with _lock:
-        _import_local_file()
         for chat in _all_chats():
             if not chat.get("graph_ids"):
                 continue
@@ -280,20 +224,17 @@ def _get_chat(chat_id: str) -> dict[str, Any] | None:
 
 def list_chats() -> list[dict[str, Any]]:
     with _lock:
-        _import_local_file()
         chats = sorted(_all_chats(), key=lambda chat: chat.get("updated_at", ""), reverse=True)
         return [_summary(chat) for chat in chats]
 
 
 def get_chat(chat_id: str) -> dict[str, Any] | None:
     with _lock:
-        _import_local_file()
         return _get_chat(chat_id)
 
 
 def create_chat(title: str | None, graph_ids: list[str]) -> dict[str, Any]:
     with _lock:
-        _import_local_file()
         known = {graph["id"] for graph in list_graphs()}
         now = _now()
         chat = {
@@ -314,7 +255,6 @@ def update_chat(
     graph_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
     with _lock:
-        _import_local_file()
         chat = _get_chat(chat_id)
         if chat is None:
             return None
@@ -330,7 +270,6 @@ def update_chat(
 
 def delete_chat(chat_id: str) -> bool:
     with _lock:
-        _import_local_file()
         if _get_chat(chat_id) is None:
             return False
         name = _ensure_workspace()
@@ -344,7 +283,6 @@ def delete_chat(chat_id: str) -> bool:
 
 def append_messages(chat_id: str, messages: list[dict[str, Any]]) -> dict[str, Any] | None:
     with _lock:
-        _import_local_file()
         chat = _get_chat(chat_id)
         if chat is None:
             return None
