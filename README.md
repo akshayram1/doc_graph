@@ -7,7 +7,9 @@ Finsk is a university knowledge graph and skill-based placement system with a Fa
 ```text
 Finsk/
 ├── .env              # single env file for backend and frontend
-├── Makefile          # make install / make run
+├── Makefile          # Mac/Linux: make install / make run
+├── install.bat       # Windows: install dependencies
+├── run.bat           # Windows: start backend and frontend
 ├── backend/          # FastAPI API, Qdrant search & Groq LLM integration
 └── frontend/         # Next.js web application
 ```
@@ -16,16 +18,46 @@ Finsk/
 
 ## Quick start
 
-From the project root:
+Copy the env file once, then install and run.
+
+```bash
+cp .env.example .env
+```
+
+On Windows Command Prompt, that copy is:
+
+```bat
+copy .env.example .env
+```
+
+Fill in the Qdrant and Groq keys in `.env` before the first run.
+
+### Mac or Linux
 
 ```bash
 make install
 make run
 ```
 
-`make install` creates `backend/.venv`, installs Python packages, and installs the frontend npm packages.
+### Windows
 
-`make run` starts the backend and the frontend together. Ctrl+C stops both.
+`make` is not required. From the project folder in Command Prompt or PowerShell:
+
+```bat
+install.bat
+run.bat
+```
+
+In PowerShell, prefix them with `.\` if Windows asks you to:
+
+```powershell
+.\install.bat
+.\run.bat
+```
+
+`install` creates `backend/.venv`, installs the Python packages, and installs the frontend npm packages.
+
+`run` starts the backend and the frontend together. Ctrl+C stops both.
 
 - Frontend: http://localhost:3000
 - Backend: http://127.0.0.1:8000
@@ -43,10 +75,6 @@ Nodes live in Qdrant tagged with `graph_id`. Document and chat metadata (names, 
 
 One file, at the project root: `.env`.
 
-```bash
-cp .env.example .env
-```
-
-Fill in the Qdrant and Groq keys. The backend and the frontend both read that file. `NEXT_PUBLIC_API_URL` is the address the browser uses to call the API.
+The backend and the frontend both read that one file. `NEXT_PUBLIC_API_URL` is the address the browser uses to call the API.
 
 Do not commit `.env`. It stays on your machine. The repo only includes `.env.example`, which has placeholders.
