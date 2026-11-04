@@ -14,11 +14,17 @@ from app.services.store import StoreNotConfigured
 
 settings = get_settings()
 
+local_origins = {
+    settings.frontend_origin.rstrip("/"),
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+}
+
 app = FastAPI(title=f"{settings.app_name} API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    allow_origins=sorted(local_origins),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

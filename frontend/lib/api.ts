@@ -1,4 +1,13 @@
-export const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:8000';
+const configuredApiUrl = (process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
+
+export const apiUrl = configuredApiUrl;
+
+function apiBase(): string {
+  if (typeof window !== 'undefined') {
+    return '';
+  }
+  return configuredApiUrl;
+}
 
 export type BackendStatus = {
   app: string;
@@ -102,7 +111,14 @@ async function readError(response: Response): Promise<string> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiUrl}${path}`, { cache: 'no-store', ...init });
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase()}${path}`, { cache: 'no-store', ...init });
+  } catch {
+    throw new Error(
+      'Cannot reach the API. On Windows, stop the app and start it again with run.bat so the backend is running on http://127.0.0.1:8000.'
+    );
+  }
   if (!response.ok) {
     throw new Error(await readError(response));
   }

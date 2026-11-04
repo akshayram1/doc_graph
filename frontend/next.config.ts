@@ -22,15 +22,22 @@ function findRoot(): string {
 
 const rootDir = findRoot();
 const { combinedEnv } = loadEnvConfig(rootDir);
-const apiUrl =
+const apiUrl = (
   process.env.NEXT_PUBLIC_API_URL ||
   combinedEnv.NEXT_PUBLIC_API_URL ||
-  'http://127.0.0.1:8000';
+  'http://127.0.0.1:8000'
+).replace(/\/$/, '');
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: rootDir,
   env: {
     NEXT_PUBLIC_API_URL: apiUrl,
+  },
+  async rewrites() {
+    return [
+      { source: '/api/:path*', destination: `${apiUrl}/api/:path*` },
+      { source: '/health', destination: `${apiUrl}/health` },
+    ];
   },
 };
 
