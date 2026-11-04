@@ -199,19 +199,11 @@ export default function Workspace() {
                       <Link className="btn btn-sm btn-ghost" href={`/graph?ids=${g.id}`}>
                         Graph
                       </Link>
+                      <button type="button" className="btn btn-sm btn-danger" onClick={() => void removeGraph(g)}>
+                        Delete
+                      </button>
                       <span className="spacer" />
                       <span className="muted tiny">{timeAgo(g.created_at)}</span>
-                      <button
-                        type="button"
-                        className="icon-btn danger"
-                        onClick={() => void removeGraph(g)}
-                        aria-label={`Delete ${g.name}`}
-                        title="Delete document graph"
-                      >
-                        <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden>
-                          <path d="M4 6h12M8 6V4h4v2M6 6l1 10h6l1-10" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                        </svg>
-                      </button>
                     </div>
                   </article>
                 );
@@ -276,14 +268,8 @@ export default function Workspace() {
                         <span className="muted tiny">{plural(c.message_count, 'message')}</span>
                       </div>
                     </Link>
-                    <button
-                      type="button"
-                      className="icon-btn danger chat-row-del"
-                      onClick={() => void removeChat(c)}
-                      aria-label={`Delete chat ${c.title}`}
-                      title="Delete chat"
-                    >
-                      ✕
+                    <button type="button" className="btn btn-sm btn-danger chat-row-del" onClick={() => void removeChat(c)}>
+                      Delete
                     </button>
                   </li>
                 ))}

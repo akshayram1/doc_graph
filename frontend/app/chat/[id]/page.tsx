@@ -8,6 +8,7 @@ import DocToggleBar from '@/components/DocToggleBar';
 import { NewChatDialog } from '@/components/Dialogs';
 import GraphVisualizer from '@/components/GraphVisualizer';
 import {
+  deleteChat,
   getChat,
   listChats,
   listGraphs,
@@ -63,6 +64,17 @@ export default function ChatPage() {
       void refreshList();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not update the chat');
+    }
+  };
+
+  const removeChat = async () => {
+    if (!chat) return;
+    if (!window.confirm(`Delete the chat “${chat.title}”?`)) return;
+    try {
+      await deleteChat(chat.id);
+      router.push('/');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not delete the chat');
     }
   };
 
@@ -158,6 +170,11 @@ export default function ChatPage() {
               </h1>
             )}
             <span className="spacer" />
+            {chat && (
+              <button type="button" className="btn btn-sm btn-danger" onClick={() => void removeChat()}>
+                Delete chat
+              </button>
+            )}
             <button
               type="button"
               className={`btn btn-sm ${showGraph ? 'btn-ghost' : ''}`}

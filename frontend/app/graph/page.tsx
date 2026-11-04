@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import DocToggleBar from '@/components/DocToggleBar';
 import GraphVisualizer from '@/components/GraphVisualizer';
-import { createChat, listGraphs, type GraphInfo } from '@/lib/api';
+import { createChat, deleteGraph, listGraphs, type GraphInfo } from '@/lib/api';
 
 function Explorer() {
   const router = useRouter();
@@ -29,6 +29,19 @@ function Explorer() {
     router.replace(`/graph?ids=${next.join(',')}`, { scroll: false });
   };
 
+  const removeGraphs = async () => {
+    const chosen = graphs.filter((graph) => ids.includes(graph.id));
+    if (chosen.length === 0) return;
+    const label = chosen.length === 1 ? `“${chosen[0].name}”` : `${chosen.length} graphs`;
+    if (!window.confirm(`Delete ${label}? The nodes are removed from Qdrant. Chats keep their messages.`)) return;
+    try {
+      await Promise.all(chosen.map((graph) => deleteGraph(graph.id)));
+      router.push('/');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not delete the graph');
+    }
+  };
+
   return (
     <div className="explorer">
       <header className="explorer-top">
@@ -42,6 +55,9 @@ function Explorer() {
         </Link>
         <DocToggleBar graphs={graphs} selected={ids} onChange={change} label="Showing" />
         <span className="spacer" />
+        <button type="button" className="btn btn-sm btn-danger" disabled={ids.length === 0} onClick={() => void removeGraphs()}>
+          {ids.length > 1 ? 'Delete graphs' : 'Delete graph'}
+        </button>
         <button
           type="button"
           className="btn btn-sm"
